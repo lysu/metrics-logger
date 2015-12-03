@@ -7,8 +7,6 @@ import (
 	"github.com/golang/glog"
 )
 
-const SYSTEM_LOG_ID = "GO"
-
 const (
 	GoroutineCount   = "GoroutineCount"
 	MemoryAllocated  = "MemoryAllocated"
@@ -22,23 +20,23 @@ const (
 	GcPerSecond      = "GcPerSecond"
 )
 
-func Time(logid string, key string, startTime time.Time, timeThreshold time.Duration) {
+func Time(key string, startTime time.Time, timeThreshold time.Duration) {
 	timeSpent := time.Now().Sub(startTime)
 	if timeSpent > timeThreshold {
-		glog.Infof("%s, time spent: %d, for %s", logid, timeSpent.Nanoseconds()/int64(time.Millisecond), key)
+		glog.Infof("[GoMetric]time spent: %d, for %s", timeSpent.Nanoseconds()/int64(time.Millisecond), key)
 	}
 }
 
-func CountOne(logid string, key string) {
-	Count(logid, key, 1)
+func CountOne(key string) {
+	Count(key, 1)
 }
 
-func Count(logid string, key string, num int) {
-	glog.Infof("%s, counter increase %d, for %s", logid, num, key)
+func Count(key string, num int) {
+	glog.Infof("[GoMetric]counter increase %d, for %s", num, key)
 }
 
-func Gauga(logid string, key string, value float64) {
-	glog.Infof("%s, gauga set %2f, for %s", logid, value, key)
+func Gauga(key string, value float64) {
+	glog.Infof("[GoMetric]gauga set %2f, for %s", value, key)
 }
 
 func GoMonitor(interval time.Duration) {
@@ -63,17 +61,17 @@ func GoMonitor(interval time.Duration) {
 
 			now := time.Now()
 
-			Gauga(SYSTEM_LOG_ID, GoroutineCount, float64(runtime.NumGoroutine()))
-			Gauga(SYSTEM_LOG_ID, MemoryAllocated, float64(memStats.Alloc))
-			Gauga(SYSTEM_LOG_ID, MemoryMallocs, float64(memStats.Mallocs))
-			Gauga(SYSTEM_LOG_ID, MemoryFrees, float64(memStats.Frees))
-			Gauga(SYSTEM_LOG_ID, MemoryHeap, float64(memStats.HeapAlloc))
-			Gauga(SYSTEM_LOG_ID, MemoryStack, float64(memStats.StackInuse))
-			Gauga(SYSTEM_LOG_ID, GcTotalPause, float64(memStats.PauseTotalNs)/nsInMs)
+			Gauga(GoroutineCount, float64(runtime.NumGoroutine()))
+			Gauga(MemoryAllocated, float64(memStats.Alloc))
+			Gauga(MemoryMallocs, float64(memStats.Mallocs))
+			Gauga(MemoryFrees, float64(memStats.Frees))
+			Gauga(MemoryHeap, float64(memStats.HeapAlloc))
+			Gauga(MemoryStack, float64(memStats.StackInuse))
+			Gauga(GcTotalPause, float64(memStats.PauseTotalNs)/nsInMs)
 
 			if lastPauseNs > 0 {
 				pauseSinceLastSample := memStats.PauseTotalNs - lastPauseNs
-				Gauga(SYSTEM_LOG_ID, GcPausePerSecond, float64(pauseSinceLastSample)/nsInMs/interval.Seconds())
+				Gauga(GcPausePerSecond, float64(pauseSinceLastSample)/nsInMs/interval.Seconds())
 			}
 			lastPauseNs = memStats.PauseTotalNs
 
@@ -81,7 +79,7 @@ func GoMonitor(interval time.Duration) {
 			if lastNumGc > 0 {
 				diff := float64(countGc)
 				diffTime := now.Sub(lastSampleTime).Seconds()
-				Gauga(SYSTEM_LOG_ID, GcPerSecond, float64(diff)/diffTime)
+				Gauga(GcPerSecond, float64(diff)/diffTime)
 			}
 
 			if countGc > 0 {
@@ -91,7 +89,7 @@ func GoMonitor(interval time.Duration) {
 				for i := 0; i < countGc; i++ {
 					idx := int((memStats.NumGC-uint32(i))+255) % 256
 					pause := float64(memStats.PauseNs[idx])
-					Gauga(SYSTEM_LOG_ID, GcPauseTime, float64(pause/nsInMs))
+					Gauga(GcPauseTime, float64(pause/nsInMs))
 				}
 			}
 
