@@ -1,101 +1,75 @@
 package metrics
 
 import (
-	"runtime"
+	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/golang/glog"
 )
 
-const (
-	GoroutineCount   = "GoroutineCount"
-	MemoryAllocated  = "MemoryAllocated"
-	MemoryMallocs    = "MemoryMallocs"
-	MemoryFrees      = "MemoryFrees"
-	MemoryHeap       = "MemoryHeap"
-	MemoryStack      = "MemoryStack"
-	GcPauseTime      = "GcPauseTime"
-	GcTotalPause     = "GcTotalPause"
-	GcPausePerSecond = "GcPausePerSecond"
-	GcPerSecond      = "GcPerSecond"
-)
+type counter struct {
+	c *uint64
+}
 
-func Time(key string, startTime time.Time, timeThreshold time.Duration) {
-	timeSpent := time.Now().Sub(startTime)
-	if timeSpent > timeThreshold {
-		glog.Infof("[GoMetric]time spent: %d, for %s", timeSpent.Nanoseconds()/int64(time.Millisecond), key)
+func newCounter() counter {
+	cc := uint64(0)
+	return counter{
+		c: &cc,
 	}
 }
 
-func CountOne(key string) {
-	Count(key, 1)
+func (c *counter) increase() {
+	atomic.AddUint64(c.c, 1)
 }
 
-func Count(key string, num int) {
-	glog.Infof("[GoMetric]counter increase %d, for %s", num, key)
+func (c *counter) reset() {
+	atomic.StoreUint64(c.c, 0)
 }
 
-func Gauga(key string, value float64) {
-	glog.Infof("[GoMetric]gauga set %2f, for %s", value, key)
+type Metrics struct {
+	startTime  time.Time
+	currentIdx int
+	windows    []counter
+	windowSize int
+	duration   time.Duration
+	lock       sync.Locker
 }
 
-func GoMonitor(interval time.Duration) {
-	go func() {
+func NewMetrics(size int, duration time.Duration) *Metrics {
+	start := time.Now()
+	m := &Metrics{
+		startTime:  start,
+		currentIdx: 0,
+		windows:    make([]counter, 0, size),
+		windowSize: size,
+		duration:   duration,
+		lock:       &sync.RWMutex{},
+	}
+	for i := 0; i < size; i++ {
+		m.windows = append(m.windows, newCounter())
+	}
+	return m
+}
 
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Warningf("Monitor goroutine is panic %v \n", r)
-			}
-		}()
+func (m *Metrics) RecordOne() {
+	current := time.Now()
 
-		memStats := &runtime.MemStats{}
-		lastSampleTime := time.Now()
-		var lastPauseNs uint64 = 0
-		var lastNumGc uint32 = 0
+	perWindowNano := m.duration.Nanoseconds() / int64(m.windowSize)
 
-		nsInMs := float64(time.Millisecond)
+	idx := int(current.Sub(m.startTime).Nanoseconds() / perWindowNano % int64(m.windowSize))
+	m.lock.Lock()
+	if m.currentIdx != idx {
+		m.currentIdx = idx
+		m.windows[idx].reset()
+	}
+	m.lock.Unlock()
+	m.windows[idx].increase()
+}
 
-		for range time.Tick(interval) {
+func (m *Metrics) QPS() float64 {
+	var total uint64
+	for _, counter := range m.windows {
+		total += atomic.LoadUint64(counter.c)
 
-			runtime.ReadMemStats(memStats)
-
-			now := time.Now()
-
-			Gauga(GoroutineCount, float64(runtime.NumGoroutine()))
-			Gauga(MemoryAllocated, float64(memStats.Alloc))
-			Gauga(MemoryMallocs, float64(memStats.Mallocs))
-			Gauga(MemoryFrees, float64(memStats.Frees))
-			Gauga(MemoryHeap, float64(memStats.HeapAlloc))
-			Gauga(MemoryStack, float64(memStats.StackInuse))
-			Gauga(GcTotalPause, float64(memStats.PauseTotalNs)/nsInMs)
-
-			if lastPauseNs > 0 {
-				pauseSinceLastSample := memStats.PauseTotalNs - lastPauseNs
-				Gauga(GcPausePerSecond, float64(pauseSinceLastSample)/nsInMs/interval.Seconds())
-			}
-			lastPauseNs = memStats.PauseTotalNs
-
-			countGc := int(memStats.NumGC - lastNumGc)
-			if lastNumGc > 0 {
-				diff := float64(countGc)
-				diffTime := now.Sub(lastSampleTime).Seconds()
-				Gauga(GcPerSecond, float64(diff)/diffTime)
-			}
-
-			if countGc > 0 {
-				if countGc > 256 {
-					countGc = 256
-				}
-				for i := 0; i < countGc; i++ {
-					idx := int((memStats.NumGC-uint32(i))+255) % 256
-					pause := float64(memStats.PauseNs[idx])
-					Gauga(GcPauseTime, float64(pause/nsInMs))
-				}
-			}
-
-			lastNumGc = memStats.NumGC
-			lastSampleTime = now
-
-		}
-	}()
+	}
+	return float64(total) / m.duration.Seconds()
 }
