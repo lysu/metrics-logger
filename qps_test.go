@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkQPS(b *testing.B) {
-	m := metrics.NewMonitor(20, 2*time.Second)
+	m := metrics.NewQPS(20, 2*time.Second)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		m.RecordOne()
